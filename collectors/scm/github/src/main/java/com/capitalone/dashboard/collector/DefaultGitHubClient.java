@@ -7,6 +7,7 @@ import com.capitalone.dashboard.model.CommitType;
 import com.capitalone.dashboard.model.GitHubParsed;
 import com.capitalone.dashboard.model.GitHubRepo;
 import com.capitalone.dashboard.model.GitRequest;
+import com.capitalone.dashboard.model.Tag;
 import com.capitalone.dashboard.util.Encryption;
 import com.capitalone.dashboard.util.EncryptionException;
 import com.capitalone.dashboard.util.Supplier;
@@ -356,6 +357,57 @@ public class DefaultGitHubClient implements GitHubClient {
         }
         return issues;
     }
+    
+    
+	@Override
+	public List<Tag> getTags(GitHubRepo repo, boolean firstRun) throws MalformedURLException, HygieiaException {
+		List<Tag> tags = new ArrayList<Tag>();
+		
+        String repoUrl = (String) repo.getOptions().get("url");
+        GitHubParsed gitHubParsed = new GitHubParsed(repoUrl);
+        String apiUrl = gitHubParsed.getApiUrl();
+
+        String queryUrl = apiUrl.concat("/tags");
+
+        String decryptedPassword = decryptString(repo.getPassword(), settings.getKey());
+        boolean lastPage = false;
+        String queryUrlPage = queryUrl;
+        
+        while (!lastPage) {
+            LOG.info("Executing [" + queryUrlPage);
+            ResponseEntity<String> response = makeRestCall(queryUrlPage, repo.getUserId(), decryptedPassword);
+            JSONArray jsonArray = paresAsArray(response);
+            for (Object item : jsonArray) {
+            	JSONObject jsonObject = (JSONObject) item;
+            	String name = str(jsonObject, "name");
+            	JSONObject commitObject = (JSONObject) jsonObject.get("commit");
+            	
+            	String sha = str(commitObject, "sha");
+            	String url = str(commitObject, "url");
+            	
+            	Tag tag = new Tag();
+            	tag.setName(name);
+            	tag.setScmRevisionNumber(sha);
+            	tag.setScmUrl(url);
+            	
+        		tags.add(tag);
+            	
+                if (CollectionUtils.isEmpty(jsonArray)) {
+                    lastPage = true;
+                } else {
+                    if (isThisLastPage(response)) {
+                        lastPage = true;
+                    } else {
+                        lastPage = false;
+                        queryUrlPage = getNextPageUrl(response);
+                    }
+                }
+        		
+            }
+        }
+		
+		return tags;
+	}
 
 
     /**
@@ -583,6 +635,8 @@ public class DefaultGitHubClient implements GitHubClient {
         cal.setTime(dt);
         return String.format("%tFT%<tRZ", cal);
     }
+
+
 }
 
 // X-RateLimit-Remaining

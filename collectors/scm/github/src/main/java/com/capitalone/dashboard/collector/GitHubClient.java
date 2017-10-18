@@ -4,6 +4,7 @@ import com.capitalone.dashboard.misc.HygieiaException;
 import com.capitalone.dashboard.model.Commit;
 import com.capitalone.dashboard.model.GitHubRepo;
 import com.capitalone.dashboard.model.GitRequest;
+import com.capitalone.dashboard.model.Tag;
 
 import java.net.MalformedURLException;
 import java.util.List;
@@ -21,4 +22,5 @@ public interface GitHubClient {
 
     List<GitRequest> getIssues(GitHubRepo repo, boolean firstRun) throws MalformedURLException, HygieiaException;
 
+    List<Tag> getTags(GitHubRepo repo, boolean firstRun) throws MalformedURLException, HygieiaException;
 }

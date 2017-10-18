@@ -1,19 +1,15 @@
 package com.capitalone.dashboard.collector;
 
 
-import com.capitalone.dashboard.misc.HygieiaException;
-import com.capitalone.dashboard.model.CollectionError;
-import com.capitalone.dashboard.model.Collector;
-import com.capitalone.dashboard.model.CollectorItem;
-import com.capitalone.dashboard.model.CollectorType;
-import com.capitalone.dashboard.model.Commit;
-import com.capitalone.dashboard.model.GitHubRepo;
-import com.capitalone.dashboard.model.GitRequest;
-import com.capitalone.dashboard.repository.BaseCollectorRepository;
-import com.capitalone.dashboard.repository.CommitRepository;
-import com.capitalone.dashboard.repository.ComponentRepository;
-import com.capitalone.dashboard.repository.GitHubRepoRepository;
-import com.capitalone.dashboard.repository.GitRequestRepository;
+import java.net.MalformedURLException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.logging.Log;
@@ -26,14 +22,21 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestClientException;
 
-import java.net.MalformedURLException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
+import com.capitalone.dashboard.misc.HygieiaException;
+import com.capitalone.dashboard.model.CollectionError;
+import com.capitalone.dashboard.model.Collector;
+import com.capitalone.dashboard.model.CollectorItem;
+import com.capitalone.dashboard.model.CollectorType;
+import com.capitalone.dashboard.model.Commit;
+import com.capitalone.dashboard.model.GitHubRepo;
+import com.capitalone.dashboard.model.GitRequest;
+import com.capitalone.dashboard.model.Tag;
+import com.capitalone.dashboard.repository.BaseCollectorRepository;
+import com.capitalone.dashboard.repository.CommitRepository;
+import com.capitalone.dashboard.repository.ComponentRepository;
+import com.capitalone.dashboard.repository.GitHubRepoRepository;
+import com.capitalone.dashboard.repository.GitRequestRepository;
+import com.capitalone.dashboard.repository.TagRepository;
 
 /**
  * CollectorTask that fetches Commit information from GitHub
@@ -49,6 +52,7 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
     private final GitHubClient gitHubClient;
     private final GitHubSettings gitHubSettings;
     private final ComponentRepository dbComponentRepository;
+    private final TagRepository tagRepository;
     private static final long FOURTEEN_DAYS_MILLISECONDS = 14 * 24 * 60 * 60 * 1000;
     private static final String API_RATE_LIMIT_MESSAGE = "API rate limit exceeded";
 
@@ -60,7 +64,8 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
                                GitRequestRepository gitRequestRepository,
                                GitHubClient gitHubClient,
                                GitHubSettings gitHubSettings,
-                               ComponentRepository dbComponentRepository) {
+                               ComponentRepository dbComponentRepository,
+                               TagRepository tagRepository) {
         super(taskScheduler, "GitHub");
         this.collectorRepository = collectorRepository;
         this.gitHubRepoRepository = gitHubRepoRepository;
@@ -69,6 +74,7 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
         this.gitHubSettings = gitHubSettings;
         this.dbComponentRepository = dbComponentRepository;
         this.gitRequestRepository = gitRequestRepository;
+        this.tagRepository = tagRepository;
     }
 
     @Override
@@ -154,6 +160,7 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
         int commitCount = 0;
         int pullCount = 0;
         int issueCount = 0;
+        int tagCount = 0;
 
         clean(collector);
         for (GitHubRepo repo : enabledRepos(collector)) {
@@ -188,7 +195,18 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
                     );
                     List<GitRequest> pulls = gitHubClient.getPulls(repo, "all", firstRun, prCloseMap);
                     pullCount += processList(repo, pulls, "pull");
-
+                    
+                    //Step 4. Get all the tags
+                    List<Tag> allTags = gitHubClient.getTags(repo, firstRun);
+                	for (Tag tag : allTags) {
+                		if (isNewTag(repo, tag)) {
+                			tag.setCollectorItemId(repo.getId());
+                			tagRepository.save(tag);
+                			tagCount++;
+                		}
+                		
+                	}                  
+                    
                     repo.setLastUpdated(System.currentTimeMillis());
                 } catch (HttpStatusCodeException hc) {
                     LOG.error("Error fetching commits for:" + repo.getRepoUrl(), hc);
@@ -213,6 +231,7 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
         log("New Commits", start, commitCount);
         log("New Pulls", start, pullCount);
         log("New Issues", start, issueCount);
+        log("New Tags", start, tagCount);
 
         log("Finished", start);
     }
@@ -251,6 +270,10 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
     private boolean isNewCommit(GitHubRepo repo, Commit commit) {
         return commitRepository.findByCollectorItemIdAndScmRevisionNumber(
                 repo.getId(), commit.getScmRevisionNumber()) == null;
+    }
+    
+    private boolean isNewTag(GitHubRepo repo, Tag tag) {
+    	return tagRepository.findByCollectorItemIdAndName(repo.getId(),tag.getName()) == null;
     }
 
     private GitRequest getExistingRequest(GitHubRepo repo, GitRequest request, String type) {
