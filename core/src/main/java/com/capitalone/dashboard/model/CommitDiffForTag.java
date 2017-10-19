@@ -4,16 +4,16 @@ import org.bson.types.ObjectId;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 
-@Document(collection="tags")
-public class Tag extends SCM{
-	
+@Document(collection="commitdiffsfortag")
+public class CommitDiffForTag extends SCM {
+
 	@Id
     private ObjectId id;
 	private ObjectId collectorItemId;
-    private String name;
-    private long timestamp;
-    
-    public ObjectId getId() {
+    private String tagName; //non-unique
+    private String message;
+	
+	public ObjectId getId() {
 		return id;
 	}
 	public void setId(ObjectId id) {
@@ -25,18 +25,19 @@ public class Tag extends SCM{
 	public void setCollectorItemId(ObjectId collectorItemId) {
 		this.collectorItemId = collectorItemId;
 	}
-	public String getName() {
-		return name;
+	public String getTagName() {
+		return tagName;
 	}
-	public void setName(String name) {
-		this.name = name;
-	}
-	public long getTimestamp() {
-		return timestamp;
-	}
-	public void setTimestamp(long timestamp) {
-		this.timestamp = timestamp;
+	public void setTagName(String tagName) {
+		this.tagName = tagName;
 	}
 
+	public String getMessage() {
+		return message;
+	}
+	public void setMessage(String message) {
+		this.message = message;
+	}
 
+	
 }

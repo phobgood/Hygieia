@@ -2,6 +2,7 @@ package com.capitalone.dashboard.collector;
 
 import com.capitalone.dashboard.misc.HygieiaException;
 import com.capitalone.dashboard.model.Commit;
+import com.capitalone.dashboard.model.CommitDiffForTag;
 import com.capitalone.dashboard.model.GitHubRepo;
 import com.capitalone.dashboard.model.GitRequest;
 import com.capitalone.dashboard.model.Tag;
@@ -22,5 +23,7 @@ public interface GitHubClient {
 
     List<GitRequest> getIssues(GitHubRepo repo, boolean firstRun) throws MalformedURLException, HygieiaException;
 
-    List<Tag> getTags(GitHubRepo repo, boolean firstRun) throws MalformedURLException, HygieiaException;
+    List<Tag> getTags(GitHubRepo repo) throws MalformedURLException, HygieiaException;
+    
+    List<CommitDiffForTag> getCommitDiffsForTags(GitHubRepo repo, String startTag, String endTag) throws MalformedURLException, HygieiaException;
 }

@@ -3,6 +3,7 @@ package com.capitalone.dashboard.collector;
 
 import java.net.MalformedURLException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -28,15 +29,18 @@ import com.capitalone.dashboard.model.Collector;
 import com.capitalone.dashboard.model.CollectorItem;
 import com.capitalone.dashboard.model.CollectorType;
 import com.capitalone.dashboard.model.Commit;
+import com.capitalone.dashboard.model.CommitDiffForTag;
 import com.capitalone.dashboard.model.GitHubRepo;
 import com.capitalone.dashboard.model.GitRequest;
 import com.capitalone.dashboard.model.Tag;
 import com.capitalone.dashboard.repository.BaseCollectorRepository;
+import com.capitalone.dashboard.repository.CommitDiffForTagRepository;
 import com.capitalone.dashboard.repository.CommitRepository;
 import com.capitalone.dashboard.repository.ComponentRepository;
 import com.capitalone.dashboard.repository.GitHubRepoRepository;
 import com.capitalone.dashboard.repository.GitRequestRepository;
 import com.capitalone.dashboard.repository.TagRepository;
+import com.capitalone.dashboard.util.TagTimestampComparator;
 
 /**
  * CollectorTask that fetches Commit information from GitHub
@@ -53,6 +57,7 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
     private final GitHubSettings gitHubSettings;
     private final ComponentRepository dbComponentRepository;
     private final TagRepository tagRepository;
+    private final CommitDiffForTagRepository commitDiffForTagRepository;
     private static final long FOURTEEN_DAYS_MILLISECONDS = 14 * 24 * 60 * 60 * 1000;
     private static final String API_RATE_LIMIT_MESSAGE = "API rate limit exceeded";
 
@@ -65,7 +70,8 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
                                GitHubClient gitHubClient,
                                GitHubSettings gitHubSettings,
                                ComponentRepository dbComponentRepository,
-                               TagRepository tagRepository) {
+                               TagRepository tagRepository,
+                               CommitDiffForTagRepository commitDiffForTagRepository) {
         super(taskScheduler, "GitHub");
         this.collectorRepository = collectorRepository;
         this.gitHubRepoRepository = gitHubRepoRepository;
@@ -75,6 +81,7 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
         this.dbComponentRepository = dbComponentRepository;
         this.gitRequestRepository = gitRequestRepository;
         this.tagRepository = tagRepository;
+        this.commitDiffForTagRepository = commitDiffForTagRepository;
     }
 
     @Override
@@ -161,6 +168,7 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
         int pullCount = 0;
         int issueCount = 0;
         int tagCount = 0;
+        int commitDiffForTagCount = 0;
 
         clean(collector);
         for (GitHubRepo repo : enabledRepos(collector)) {
@@ -197,7 +205,7 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
                     pullCount += processList(repo, pulls, "pull");
                     
                     //Step 4. Get all the tags
-                    List<Tag> allTags = gitHubClient.getTags(repo, firstRun);
+                    List<Tag> allTags = gitHubClient.getTags(repo);
                 	for (Tag tag : allTags) {
                 		if (isNewTag(repo, tag)) {
                 			tag.setCollectorItemId(repo.getId());
@@ -206,6 +214,29 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
                 		}
                 		
                 	}                  
+                	
+                	//begin sorting tags
+                	Collections.sort(allTags, new TagTimestampComparator());
+                	
+                	//assuming we want to diff recent tag from previous tag to isolate diff.
+                	//there's no previous tag to diff from for the first tag
+                	String startTag = null;
+                	
+                	for (Tag tag : allTags) {
+                		if (startTag != null) {
+                			String endTag = tag.getName();
+                			List<CommitDiffForTag> commitDiffsForTags = gitHubClient.getCommitDiffsForTags(repo, startTag, endTag);
+                			for (CommitDiffForTag commitDiffForTag : commitDiffsForTags) {
+                				if (isNewCommitDiffForTag(repo, commitDiffForTag)) {
+                					commitDiffForTag.setCollectorItemId(repo.getId());
+                					commitDiffForTagRepository.save(commitDiffForTag);
+                					commitDiffForTagCount++;
+                				}
+                			}
+                		}
+                		startTag = tag.getName();
+                	}
+                    
                     
                     repo.setLastUpdated(System.currentTimeMillis());
                 } catch (HttpStatusCodeException hc) {
@@ -232,6 +263,7 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
         log("New Pulls", start, pullCount);
         log("New Issues", start, issueCount);
         log("New Tags", start, tagCount);
+        log("New Commit Diffs", start, commitDiffForTagCount);
 
         log("Finished", start);
     }
@@ -274,6 +306,10 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
     
     private boolean isNewTag(GitHubRepo repo, Tag tag) {
     	return tagRepository.findByCollectorItemIdAndName(repo.getId(),tag.getName()) == null;
+    }
+    
+    private boolean isNewCommitDiffForTag(GitHubRepo repo, CommitDiffForTag commitDiffForTag) {
+    	return commitDiffForTagRepository.findByScmRevisionNumberAndTagName(commitDiffForTag.getScmRevisionNumber(), commitDiffForTag.getTagName()) == null;
     }
 
     private GitRequest getExistingRequest(GitHubRepo repo, GitRequest request, String type) {

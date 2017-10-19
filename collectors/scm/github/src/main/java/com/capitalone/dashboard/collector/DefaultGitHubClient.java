@@ -3,6 +3,7 @@ package com.capitalone.dashboard.collector;
 import com.capitalone.dashboard.misc.HygieiaException;
 import com.capitalone.dashboard.model.Comment;
 import com.capitalone.dashboard.model.Commit;
+import com.capitalone.dashboard.model.CommitDiffForTag;
 import com.capitalone.dashboard.model.CommitType;
 import com.capitalone.dashboard.model.GitHubParsed;
 import com.capitalone.dashboard.model.GitHubRepo;
@@ -360,7 +361,7 @@ public class DefaultGitHubClient implements GitHubClient {
     
     
 	@Override
-	public List<Tag> getTags(GitHubRepo repo, boolean firstRun) throws MalformedURLException, HygieiaException {
+	public List<Tag> getTags(GitHubRepo repo) throws MalformedURLException, HygieiaException {
 		List<Tag> tags = new ArrayList<Tag>();
 		
         String repoUrl = (String) repo.getOptions().get("url");
@@ -390,6 +391,18 @@ public class DefaultGitHubClient implements GitHubClient {
             	tag.setScmRevisionNumber(sha);
             	tag.setScmUrl(url);
             	
+            	//Get the timestamp from the commit info
+            	String tagCommitUrl = apiUrl.concat("/commits/"+sha);
+            	ResponseEntity<String> commitResponse = makeRestCall(tagCommitUrl, repo.getUserId(), decryptedPassword);
+            	JSONObject commitJsonObject = parseAsObject(commitResponse);
+            	
+                JSONObject commitSubObject = (JSONObject) commitJsonObject.get("commit");
+                JSONObject commitAuthorObject = (JSONObject) commitSubObject.get("author");
+                long timestamp = new DateTime(str(commitAuthorObject, "date"))
+                        .getMillis();
+
+                tag.setTimestamp(timestamp);
+            	
         		tags.add(tag);
             	
                 if (CollectionUtils.isEmpty(jsonArray)) {
@@ -407,6 +420,43 @@ public class DefaultGitHubClient implements GitHubClient {
         }
 		
 		return tags;
+	}
+	
+	@Override
+	public List<CommitDiffForTag> getCommitDiffsForTags(GitHubRepo repo, String startTag, String endTag) throws MalformedURLException, HygieiaException {
+		List<CommitDiffForTag> commitDiffsForTag = new ArrayList();
+		
+		// TODO Auto-generated method stub
+        String repoUrl = (String) repo.getOptions().get("url");
+        GitHubParsed gitHubParsed = new GitHubParsed(repoUrl);
+        String apiUrl = gitHubParsed.getApiUrl();
+
+        String queryUrl = apiUrl.concat("/compare/"+startTag+"..."+endTag);
+
+        String decryptedPassword = decryptString(repo.getPassword(), settings.getKey());
+        String queryUrlPage = queryUrl;
+        
+     
+        LOG.info("Executing [" + queryUrlPage);
+        ResponseEntity<String> response = makeRestCall(queryUrlPage, repo.getUserId(), decryptedPassword);
+        JSONObject jsonObject = parseAsObject(response);
+        JSONArray commitsArray = (JSONArray) jsonObject.get("commits");
+        for (Object item : commitsArray) {
+        	JSONObject commitsObject = (JSONObject) item;
+        	String sha = str(commitsObject, "sha");
+        	JSONObject commitObject = (JSONObject) commitsObject.get("commit");
+        	String message = str(commitObject, "message");
+        	
+        	CommitDiffForTag commitDiffForTag = new CommitDiffForTag();
+        	commitDiffForTag.setScmRevisionNumber(sha);
+        	commitDiffForTag.setMessage(message);
+        	commitDiffForTag.setTagName(endTag);
+        	
+        	commitDiffsForTag.add(commitDiffForTag);
+        }
+        
+        
+        return commitDiffsForTag;
 	}
 
 
@@ -562,6 +612,15 @@ public class DefaultGitHubClient implements GitHubClient {
         }
         return new JSONArray();
     }
+    
+    private JSONObject parseAsObject(ResponseEntity<String> response) {
+        try {
+            return (JSONObject) new JSONParser().parse(response.getBody());
+        } catch (ParseException pe) {
+            LOG.error(pe.getMessage());
+        }
+        return new JSONObject();
+    }
 
     private String str(JSONObject json, String key) {
         Object value = json.get(key);
@@ -635,6 +694,8 @@ public class DefaultGitHubClient implements GitHubClient {
         cal.setTime(dt);
         return String.format("%tFT%<tRZ", cal);
     }
+
+
 
 
 }
